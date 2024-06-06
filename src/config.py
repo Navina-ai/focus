@@ -1,0 +1,3 @@
+VAD_AUTH_TOKEN = "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"
+PORT = 8000
+HOST = "10.0.2.155"

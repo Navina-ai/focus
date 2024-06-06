@@ -32,6 +32,9 @@ class Client:
         self.sampling_rate = sampling_rate
         self.samples_width = samples_width
         self.buffering_strategy = BufferingStrategyFactory.create_buffering_strategy(self.config['processing_strategy'], self, **self.config['processing_args'])
+        self.approved_segments = []
+        self.rejected_segments = []
+        self.last_speaker = -1
 
     def update_config(self, config_data):
         self.config.update(config_data)

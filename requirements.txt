@@ -1,3 +1,7 @@
+numpy
+torch
+av
+scikit-learn
 websockets
 speechbrain
 pyannote-audio

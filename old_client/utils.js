@@ -47,43 +47,63 @@ function initWebSocket() {
 
 function updateTranscription(transcript_data) {
     const transcriptionDiv = document.getElementById('transcription');
-    const languageDiv = document.getElementById('detected_language');
 
-    if (transcript_data['words'] && transcript_data['words'].length > 0) {
-        // Append words with color based on their probability
-        transcript_data['words'].forEach(wordData => {
-            const span = document.createElement('span');
-            const probability = wordData['probability'];
-            span.textContent = wordData['word'] + ' ';
+    // Flag to determine if any new content was added
+    let contentAdded = false;
 
-            // Set the color based on the probability
-            if (probability > 0.9) {
-                span.style.color = 'green';
-            } else if (probability > 0.6) {
-                span.style.color = 'orange';
-            } else {
-                span.style.color = 'red';
-            }
+    // Clear non-finalized segments from the display
+    const children = Array.from(transcriptionDiv.children);
+    for (let i = children.length - 1; i >= 0; i--) {
+        if (children[i].classList.contains('non-final')) {
+            transcriptionDiv.removeChild(children[i]);
+        }
+    }
 
-            transcriptionDiv.appendChild(span);
-        });
+    // Iterate through results, each result could be from a different speaker
+    transcript_data.results.forEach(result => {
+        const text = document.createElement('span');
+        text.textContent = result.text + ' ';
 
-        // Add a new line at the end
+        // Style text based on speaker ID and finalization status
+        switch (result.speaker) {
+            case -1:
+                text.style.color = 'grey';
+                break;
+            case 0:
+                text.style.color = 'blue';
+                break;
+            case 1:
+                text.style.color = 'red';
+                break;
+            default:
+                text.style.color = 'green';
+                break;
+        }
+
+        if (!result.is_finalized) {
+            text.style.opacity = '0.5';
+            text.classList.add('non-final');
+        }
+
+        transcriptionDiv.appendChild(text);
+        contentAdded = true; // Set flag to true as new content was added
+    });
+
+    // Only add a new line if new content was added
+    if (contentAdded) {
         transcriptionDiv.appendChild(document.createElement('br'));
-    } else {
-        // Fallback to plain text
-        transcriptionDiv.textContent += transcript_data['text'] + '\n';
     }
 
-    // Update the language information
-    if (transcript_data['language'] && transcript_data['language_probability']) {
-        languageDiv.textContent = transcript_data['language'] + ' (' + transcript_data['language_probability'].toFixed(2) + ')';
+    // Optionally update language information
+    if (transcript_data.language && transcript_data.language_probability) {
+        const languageDiv = document.getElementById('detected_language');
+        languageDiv.textContent = `${transcript_data.language} (${transcript_data.language_probability.toFixed(2)})`;
     }
 
-    // Update the processing time, if available
-    const processingTimeDiv = document.getElementById('processing_time');
-    if (transcript_data['processing_time']) {
-        processingTimeDiv.textContent = 'Processing time: ' + transcript_data['processing_time'].toFixed(2) + ' seconds';
+    // Update processing time if available
+    if (transcript_data.processing_time) {
+        const processingTimeDiv = document.getElementById('processing_time');
+        processingTimeDiv.textContent = 'Processing time: ' + transcript_data.processing_time.toFixed(2) + ' seconds';
     }
 }
 
@@ -131,14 +151,10 @@ function stopRecording() {
 
 function sendAudioConfig() {
     let selectedStrategy = document.getElementById('bufferingStrategySelect').value;
-    let processingArgs = {};
-
-    if (selectedStrategy === 'silence_at_end_of_chunk') {
-        processingArgs = {
-            chunk_length_seconds: parseFloat(document.getElementById('chunk_length_seconds').value),
-            chunk_offset_seconds: parseFloat(document.getElementById('chunk_offset_seconds').value)
-        };
-    }
+    let processingArgs   = {
+        chunk_length_seconds: parseFloat(document.getElementById('chunk_length_seconds').value),
+        chunk_offset_seconds: parseFloat(document.getElementById('chunk_offset_seconds').value)
+    };
 
     const audioConfig = {
         type: 'config',
@@ -202,15 +218,3 @@ function convertFloat32ToInt16(buffer) {
 
 // Initialize WebSocket on page load
 //  window.onload = initWebSocket;
-
-function toggleBufferingStrategyPanel() {
-    var selectedStrategy = document.getElementById('bufferingStrategySelect').value;
-    if (selectedStrategy === 'silence_at_end_of_chunk') {
-        var panel = document.getElementById('silence_at_end_of_chunk_options_panel');
-        panel.classList.remove('hidden');
-    } else {
-        var panel = document.getElementById('silence_at_end_of_chunk_options_panel');
-        panel.classList.add('hidden');
-    }
-}
-
