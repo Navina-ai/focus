@@ -81,6 +81,7 @@ class SilenceAtEndOfChunk(BufferingStrategyInterface):
         """   
         start = time.time()
         vad_results = await vad_pipeline.detect_activity(self.client)
+        print(vad_results)
         # first we will change segment times to be relative to the scratch buffer
         vad_results = [{'start': int(segment['start'] * self.client.sampling_rate) * self.client.samples_width,
                         'end': int(segment['end'] * self.client.sampling_rate) * self.client.samples_width} for segment

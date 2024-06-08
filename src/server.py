@@ -38,7 +38,6 @@ class Server:
     async def handle_audio(self, client, websocket):
         while True:
             message = await websocket.recv()
-
             if isinstance(message, bytes):
                 client.append_audio_data(message)
             elif isinstance(message, str):
