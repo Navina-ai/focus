@@ -1,8 +1,8 @@
 import os
-import asyncio
 import json
 import time
 
+import eventlet
 from .buffering_strategy_interface import BufferingStrategyInterface
 
 class SilenceAtEndOfChunk(BufferingStrategyInterface):
@@ -18,7 +18,7 @@ class SilenceAtEndOfChunk(BufferingStrategyInterface):
         chunk_offset_seconds (float): Offset time in seconds to be considered for processing audio chunks.
     """
 
-    def __init__(self, client, **kwargs):
+    def __init__(self, client, transcription_callback=None, **kwargs):
         """
         Initialize the SilenceAtEndOfChunk buffering strategy.
 
@@ -43,8 +43,9 @@ class SilenceAtEndOfChunk(BufferingStrategyInterface):
             self.error_if_not_realtime = kwargs.get('error_if_not_realtime', False)
         
         self.processing_flag = False
+        self.transcription_callback = transcription_callback
 
-    def process_audio(self, websocket, vad_pipeline, asr_pipeline):
+    def process_audio(self, vad_pipeline, asr_pipeline):
         """
         Process audio chunks by checking their length and scheduling asynchronous processing.
 
@@ -52,7 +53,6 @@ class SilenceAtEndOfChunk(BufferingStrategyInterface):
         it schedules asynchronous processing of the audio.
 
         Args:
-            websocket (Websocket): The WebSocket connection for sending transcriptions.
             vad_pipeline: The voice activity detection pipeline.
             asr_pipeline: The automatic speech recognition pipeline.
         """
@@ -65,23 +65,21 @@ class SilenceAtEndOfChunk(BufferingStrategyInterface):
             self.client.buffer.clear()
             self.processing_flag = True
             # Schedule the processing in a separate task
-            asyncio.create_task(self.process_audio_async(websocket, vad_pipeline, asr_pipeline))
+            eventlet.spawn(self.process_audio_async, vad_pipeline, asr_pipeline)
     
-    async def process_audio_async(self, websocket, vad_pipeline, asr_pipeline):
+    def process_audio_async(self, vad_pipeline, asr_pipeline):
         """
         Asynchronously process audio for activity detection and transcription.
 
         This method performs heavy processing, including voice activity detection and transcription of
-        the audio data. It sends the transcription results through the WebSocket connection.
+        the audio data.
 
         Args:
-            websocket (Websocket): The WebSocket connection for sending transcriptions.
             vad_pipeline: The voice activity detection pipeline.
             asr_pipeline: The automatic speech recognition pipeline.
-        """   
+        """
         start = time.time()
-        vad_results = await vad_pipeline.detect_activity(self.client)
-        print(vad_results)
+        vad_results = vad_pipeline.detect_activity(self.client)
         # first we will change segment times to be relative to the scratch buffer
         vad_results = [{'start': int(segment['start'] * self.client.sampling_rate) * self.client.samples_width,
                         'end': int(segment['end'] * self.client.sampling_rate) * self.client.samples_width} for segment
@@ -96,12 +94,14 @@ class SilenceAtEndOfChunk(BufferingStrategyInterface):
         last_segment_should_end_before = len(self.client.scratch_buffer) - int(self.chunk_offset_seconds * self.client.sampling_rate) * self.client.samples_width
         if vad_results[-1]['end'] < last_segment_should_end_before:
             self.client.approved_segments = vad_results
-            transcription = await asr_pipeline.transcribe(self.client)
+            transcription = asr_pipeline.transcribe(self.client)
             if len(transcription["results"]) > 0:
                 end = time.time()
                 transcription['processing_time'] = end - start
-                json_transcription = json.dumps(transcription) 
-                await websocket.send(json_transcription)
+                if self.client.transcription_callback:
+                    print(f'Got {len(transcription["results"])} new transcription results')
+                    print("sending transcription to callback")
+                    self.client.transcription_callback(self.client.client_id, transcription)
             self.client.scratch_buffer.clear()
             self.client.increment_file_counter()
         self.processing_flag = False
@@ -145,7 +145,7 @@ class SilenceAnywhere(BufferingStrategyInterface):
 
         self.processing_flag = False
 
-    def process_audio(self, websocket, vad_pipeline, asr_pipeline):
+    def process_audio(self, vad_pipeline, asr_pipeline):
         """
         Process audio chunks by checking their length and scheduling asynchronous processing.
 
@@ -153,7 +153,6 @@ class SilenceAnywhere(BufferingStrategyInterface):
         it schedules asynchronous processing of the audio.
 
         Args:
-            websocket (Websocket): The WebSocket connection for sending transcriptions.
             vad_pipeline: The voice activity detection pipeline.
             asr_pipeline: The automatic speech recognition pipeline.
         """
@@ -167,23 +166,21 @@ class SilenceAnywhere(BufferingStrategyInterface):
             self.client.buffer.clear()
             self.processing_flag = True
             # Schedule the processing in a separate task
-            asyncio.create_task(self.process_audio_async(websocket, vad_pipeline, asr_pipeline))
+            eventlet.spawn(self.process_audio_async, vad_pipeline, asr_pipeline)
 
-    async def process_audio_async(self, websocket, vad_pipeline, asr_pipeline):
+    def process_audio_async(self, vad_pipeline, asr_pipeline):
         """
         Asynchronously process audio for activity detection and transcription.
 
         This method performs heavy processing, including voice activity detection and transcription of
-        the audio data. It sends the transcription results through the WebSocket connection.
+        the audio data.
 
         Args:
-            websocket (Websocket): The WebSocket connection for sending transcriptions.
             vad_pipeline: The voice activity detection pipeline.
             asr_pipeline: The automatic speech recognition pipeline.
         """
         start = time.time()
-        vad_results = await vad_pipeline.detect_activity(self.client)
-
+        vad_results = vad_pipeline.detect_activity(self.client)
         if len(vad_results) == 0:
             self.client.scratch_buffer.clear()
             self.client.buffer.clear()
@@ -206,15 +203,17 @@ class SilenceAnywhere(BufferingStrategyInterface):
         self.client.approved_segments = vad_results[:split_segment]
         self.client.rejected_segments = vad_results[split_segment:]
 
-        transcription = await asr_pipeline.transcribe(self.client)
+        transcription = asr_pipeline.transcribe(self.client)
+        print(f'Got {len(transcription["results"])} new transcription results')
         if len(transcription["results"]) > 0:
+            print(f'Got {len(transcription["results"])} new transcription results')
             end = time.time()
             transcription['processing_time'] = end - start
-            json_transcription = json.dumps(transcription)
-            await websocket.send(json_transcription)
             if len(self.client.approved_segments) > 0:
                 last_approved_time = self.client.approved_segments[-1]['end']
                 self.client.scratch_buffer = self.client.scratch_buffer[int(last_approved_time * self.client.sampling_rate) * self.client.samples_width:]
-        self.client.increment_file_counter()
+            if self.client.transcription_callback:
+                self.client.transcription_callback(self.client.client_id, transcription)
 
+        self.client.increment_file_counter()
         self.processing_flag = False

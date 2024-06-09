@@ -1,7 +1,8 @@
 import argparse
-import asyncio
 import json
 
+import eventlet
+eventlet.monkey_patch()
 from server import Server
 from src.asr.asr_factory import ASRFactory
 from src.vad.vad_factory import VADFactory
@@ -36,8 +37,8 @@ def main():
 
     server = Server(vad_pipeline, asr_pipeline, host=args.host, port=args.port, sampling_rate=16000, samples_width=2, certfile=args.certfile, keyfile=args.keyfile)
 
-    asyncio.get_event_loop().run_until_complete(server.start())
-    asyncio.get_event_loop().run_forever()
+    server.start()
+    eventlet.wsgi.server(eventlet.listen(('', 8000)), server.app)
 
 if __name__ == "__main__":
     main()

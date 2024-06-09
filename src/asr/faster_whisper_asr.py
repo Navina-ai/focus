@@ -115,12 +115,12 @@ class FasterWhisperASR(ASRInterface):
         # Run on GPU with FP16
         self.asr_pipeline = WhisperModel(model_size, device="cuda", compute_type="float16")
         self.spr_pipeline = spr_pipeline
-    async def transcribe(self, client):
+    def transcribe(self, client):
         spr_sample_rate = self.spr_pipeline.model.hparams.get('sample_rate', 16000)
         # first we will run spr_pipeline on each segment
         for segment in client.approved_segments + client.rejected_segments:
                 audio_np = bytearray_audio_to_nparray(client.scratch_buffer[segment['start']:segment['end']], spr_sample_rate)
-                speaker = await self.spr_pipeline.classify_speaker(client.client_id, audio_np)
+                speaker = self.spr_pipeline.classify_speaker(client.client_id, audio_np)
                 segment['speaker'] = speaker
 
         # we want to change every unknown speaker (-1) to the last known speaker and concat into larger segments accordingly
@@ -146,9 +146,7 @@ class FasterWhisperASR(ASRInterface):
 
         new_approved_segments = merge_segments_by_speaker(client.approved_segments)
         new_rejected_segments = merge_segments_by_speaker(client.rejected_segments)
-        print("current approved segments count", len(new_approved_segments))
-        print("current rejected segments count", len(new_rejected_segments))
-
+        print (f"about to transcript {len(new_approved_segments)} approved segments and {len(new_rejected_segments)} rejected segments")
         # now we will transcribe each segment
         language = None if client.config['language'] is None else language_codes.get(client.config['language'].lower())
         transcription = {"results": []}
@@ -159,8 +157,8 @@ class FasterWhisperASR(ASRInterface):
         # Chain them together to iterate over all segments
         all_segments = chain(approved, rejected)
         for segment, is_finalized in all_segments:
+            print (f"transcripting segment {segment['start']} to {segment['end']}")
             audio_np = bytearray_audio_to_nparray(client.scratch_buffer[segment['start']:segment['end']], client.sampling_rate)
-            print("array shape", audio_np.shape)
             segments, info = self.asr_pipeline.transcribe(audio_np, word_timestamps=True, language=language)
             segments = list(segments)  # The transcription will actually run here.
 
@@ -177,6 +175,7 @@ class FasterWhisperASR(ASRInterface):
                 ],
             "is_finalized": is_finalized
             }
+            print(f"transcription results: {segment_transcribe['text']}")
             transcription["results"].append(segment_transcribe)
 
         return transcription

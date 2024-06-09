@@ -1,85 +1,79 @@
-import websockets
-import uuid
 import json
-import asyncio
-import ssl
+from typing import Dict
 
-from src.audio_utils import save_audio_to_file
+import eventlet
+import eventlet.wsgi
+eventlet.monkey_patch()
+
+import socketio
 from src.client import Client
+from src.config import DEFAULT_LANGUAGE, DEFAULT_PROCESSING_STRATEGY, DEFAULT_CHUNK_LENGTH_SECONDS, DEFAULT_CHUNK_OFFSET_SECONDS
 
 class Server:
-    """
-    Represents the WebSocket server for handling real-time audio transcription.
-
-    This class manages WebSocket connections, processes incoming audio data,
-    and interacts with VAD and ASR pipelines for voice activity detection and
-    speech recognition.
-
-    Attributes:
-        vad_pipeline: An instance of a voice activity detection pipeline.
-        asr_pipeline: An instance of an automatic speech recognition pipeline.
-        host (str): Host address of the server.
-        port (int): Port on which the server listens.
-        sampling_rate (int): The sampling rate of audio data in Hz.
-        samples_width (int): The width of each audio sample in bits.
-        connected_clients (dict): A dictionary mapping client IDs to Client objects.
-    """
-    def __init__(self, vad_pipeline, asr_pipeline, host='localhost', port=8765, sampling_rate=16000, samples_width=2, certfile = None, keyfile = None):
+    def __init__(self, vad_pipeline, asr_pipeline, host='localhost', port=8765, sampling_rate=16000, samples_width=2, certfile=None, keyfile=None):
         self.vad_pipeline = vad_pipeline
         self.asr_pipeline = asr_pipeline
         self.host = host
         self.port = port
+        self.sio = socketio.Server(cors_allowed_origins='*', async_mode='eventlet')
+        self.app = socketio.WSGIApp(self.sio)
+        self.certfile = certfile
         self.sampling_rate = sampling_rate
         self.samples_width = samples_width
-        self.certfile = certfile
         self.keyfile = keyfile
-        self.connected_clients = {}
+        self.connected_clients: Dict[str, Client] = {}
 
-    async def handle_audio(self, client, websocket):
-        while True:
-            message = await websocket.recv()
-            if isinstance(message, bytes):
-                client.append_audio_data(message)
-            elif isinstance(message, str):
-                config = json.loads(message)
-                if config.get('type') == 'config':
-                    client.update_config(config['data'])
-                    continue
-            else:
-                print(f"Unexpected message type from {client.client_id}")
+    def handle_config(self, client, message_json):
+        client.update_config(message_json['data'])
 
-            # this is synchronous, any async operation is in BufferingStrategy
-            client.process_audio(websocket, self.vad_pipeline, self.asr_pipeline)
-
-
-    async def handle_websocket(self, websocket, path):
-        client_id = str(uuid.uuid4())
-        client = Client(client_id, self.sampling_rate, self.samples_width)
-        self.connected_clients[client_id] = client
-
-        print(f"Client {client_id} connected")
-
-        try:
-            await self.handle_audio(client, websocket)
-        except websockets.ConnectionClosed as e:
-            print(f"Connection with {client_id} closed: {e}")
-        finally:
-            del self.connected_clients[client_id]
+    def send_transcription_result(self, sid, data):
+        print("emiiting audioResponse")
+        self.sio.emit('audioResponse', {'data': data}, to=sid)
 
     def start(self):
-        if self.certfile:
-            # Create an SSL context to enforce encrypted connections
-            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            
-            # Load your server's certificate and private key
-            # Replace 'your_cert_path.pem' and 'your_key_path.pem' with the actual paths to your files
-            ssl_context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
+        @self.sio.event
+        def connect(sid, environ):
+            print(f"Client {sid} connected")
+            client_id = sid
+            client = Client(client_id, self.sampling_rate, self.samples_width, self.send_transcription_result)
+            self.connected_clients[client_id] = client
 
-            print(f"WebSocket server ready to accept secure connections on {self.host}:{self.port}")
-            
-            # Pass the SSL context to the serve function along with the host and port
-            # Ensure the secure flag is set to True if using a secure WebSocket protocol (wss://)
-            return websockets.serve(self.handle_websocket, self.host, self.port, ssl=ssl_context)
+        @self.sio.event
+        def disconnect(sid):
+            print(f"Client {sid} disconnected")
+            client_to_remove = next((cid for cid, cl in self.connected_clients.items() if cl.client_id == sid), None)
+            if client_to_remove:
+                del self.connected_clients[client_to_remove]
+
+        @self.sio.on('audioData')
+        def handle_audio_data(sid, data):
+            client = self.connected_clients.get(sid)
+            if client:
+                client.append_audio_data(data)
+                client.process_audio(self.vad_pipeline, self.asr_pipeline)
+
+        @self.sio.on('config')
+        def handle_config(sid, config_message):
+            client = next((cl for cl in self.connected_clients.values() if cl.client_id == sid), None)
+            json_config = json.loads(config_message)
+            json_config_data = json_config['data']
+            if 'language' not in json_config_data:
+                json_config_data['language'] = DEFAULT_LANGUAGE
+            if 'processing_strategy' not in json_config_data:
+                json_config_data['processing_strategy'] = DEFAULT_PROCESSING_STRATEGY
+            if 'processing_args' not in json_config_data:
+                json_config_data['processing_args'] = {
+                    'chunk_length_seconds': DEFAULT_CHUNK_LENGTH_SECONDS,
+                    'chunk_offset_seconds': DEFAULT_CHUNK_OFFSET_SECONDS
+                }
+            json_config['data'] = json_config_data
+            if client:
+                self.handle_config(client, json_config)
+
+        if self.certfile and self.keyfile:
+            ssl_context = (self.certfile, self.keyfile)
+            eventlet.wsgi.server(eventlet.wrap_ssl(eventlet.listen((self.host, self.port)), certfile=self.certfile, keyfile=self.keyfile, server_side=True), self.app)
         else:
-            print(f"WebSocket server ready to accept secure connections on {self.host}:{self.port}")
-            return websockets.serve(self.handle_websocket, self.host, self.port)
+            eventlet.wsgi.server(eventlet.listen((self.host, self.port)), self.app)
+
+        print(f"Server started on {self.host}:{self.port}")

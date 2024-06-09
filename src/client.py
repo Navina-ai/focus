@@ -16,7 +16,7 @@ class Client:
         sampling_rate (int): The sampling rate of the audio data in Hz.
         samples_width (int): The width of each audio sample in bits.
     """
-    def __init__(self, client_id, sampling_rate, samples_width):
+    def __init__(self, client_id, sampling_rate, samples_width,transcription_callback=None):
         self.client_id = client_id
         self.buffer = bytearray()
         self.scratch_buffer = bytearray()
@@ -35,8 +35,10 @@ class Client:
         self.approved_segments = []
         self.rejected_segments = []
         self.last_speaker = -1
+        self.transcription_callback = transcription_callback
 
     def update_config(self, config_data):
+        print(f"Updating config for client {self.client_id}", config_data)
         self.config.update(config_data)
         self.buffering_strategy = BufferingStrategyFactory.create_buffering_strategy(self.config['processing_strategy'], self, **self.config['processing_args'])
 
@@ -53,5 +55,5 @@ class Client:
     def get_file_name(self):
         return f"{self.client_id}_{self.file_counter}.wav"
     
-    def process_audio(self, websocket, vad_pipeline, asr_pipeline):
-        self.buffering_strategy.process_audio(websocket, vad_pipeline, asr_pipeline)
+    def process_audio(self, vad_pipeline, asr_pipeline):
+        self.buffering_strategy.process_audio(vad_pipeline, asr_pipeline)

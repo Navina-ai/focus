@@ -42,7 +42,7 @@ class PyannoteEmbeddingSPR(SPRInterface):
         self.min_duration_frames_for_pred = kwargs.get('min_duration_spr_pred_sec', 0.2) * kwargs.get('sample_width', 2) * kwargs.get('sample_rate', 16000)
         self.min_duration_frames_for_save = kwargs.get('min_duration_spr_save__sec', 0.5) * kwargs.get('sample_width', 2) * kwargs.get('sample_rate', 16000)
 
-    async def classify_speaker(self, client_id, audio_data):
+    def classify_speaker(self, client_id, audio_data):
         chosen_speaker = -1
         if len(audio_data) < self.min_duration_frames_for_pred:
             return chosen_speaker
@@ -65,7 +65,6 @@ class PyannoteEmbeddingSPR(SPRInterface):
             similarities = cosine_similarity([new_embedding], current_averages)[0]
             max_similarity = np.max(similarities)
             best_match = np.argmax(similarities)
-            print(max_similarity)
             # If the best match similarity is above the threshold, update that person's data
             if max_similarity > self.threshold and embeddings[best_match]['count'] > self.min_duration_frames_for_save:
                 embeddings[best_match]['sum'] += new_embedding

@@ -5,23 +5,22 @@ const chatStore = reactive({
 });
 
 export function useChatStore() {
-    const addMessage = (message) => {
-        const newSegments = message.results;
-        if (newSegments.length > 0 && !newSegments[0].is_finalized) {
-            // Remove the last non-finalized segment
-            if (chatStore.segments.length > 0 && !chatStore.segments[chatStore.segments.length - 1].is_finalized) {
-                chatStore.segments.pop();
-            }
+    const addMessages = (messages) => {
+        const newSegments = messages.results;
+        if (newSegments.length > 0) {
+          // Remove the last non-finalized segment
+          clearNonFinalized();
+          chatStore.segments.push(...newSegments);
         }
         // Add new segments
-        chatStore.segments.push(...newSegments.filter(segment => segment.is_finalized));
     };
 
     const clearNonFinalized = () => {
-        if (chatStore.segments.length > 0 && !chatStore.segments[chatStore.segments.length - 1].is_finalized) {
-            chatStore.segments.pop();
-        }
+      // Clear non-finalized segments from the display
+      while (chatStore.segments.length > 0 && !chatStore.segments[chatStore.segments.length - 1].is_finalized) {
+        chatStore.segments.pop();
+      }
     };
 
-    return { chatStore, addMessage, clearNonFinalized };
+    return { chatStore, addMessages, clearNonFinalized };
 }

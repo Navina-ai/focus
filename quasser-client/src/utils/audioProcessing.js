@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { sendMessage, websocket } from './websocket';
+import { sendAudio, sendConfig } from './socket';
 
 const isRecording = ref(false);
 let audioContext = null;
@@ -53,7 +53,7 @@ export function useAudioRecorder() {
                 channels: 1, // Assuming mono channel
             }
         };
-        sendMessage(JSON.stringify(audioConfig));
+        sendConfig(JSON.stringify(audioConfig));
     };
 
     const processAudio = (e) => {
@@ -61,9 +61,8 @@ export function useAudioRecorder() {
         const outputSampleRate = 16000; // Target sample rate
         const downsampledBuffer = downsampleBuffer(inputBuffer, audioContext.sampleRate, outputSampleRate);
         const audioData = convertFloat32ToInt16(downsampledBuffer);
-        if (websocket.value && websocket.value.readyState === WebSocket.OPEN) {
-          websocket.value.send(audioData);
-        }
+        sendAudio(audioData);
+
     };
 
     const downsampleBuffer = (buffer, inputSampleRate, outputSampleRate) => {

@@ -4,7 +4,7 @@ class SPRInterface:
     Interface for speaker recognition (SPR) systems.
     """
 
-    async def classify_speaker(self, client_id, audio_data):
+    def classify_speaker(self, client_id, audio_data):
         """
         classify the speaker in the given audio data.
         Assuming a single speaker in the audio data.
